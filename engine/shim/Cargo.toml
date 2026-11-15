@@ -1,0 +1,9 @@
+[package]
+name = "horizon-api-shim"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-or-later"
+description = "Re-exports horizon_client::mod_api under the name the Meteor port imports"
+
+[dependencies]
+horizon-client = { path = "../../../../ref/horizon/crates/horizon-client" }

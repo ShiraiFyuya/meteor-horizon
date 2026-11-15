@@ -1,0 +1,15 @@
+[package]
+name = "meteor-engine"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-or-later"
+
+[lib]
+name = "meteor_engine"
+path = "src/lib.rs"
+
+[dependencies]
+horizon-client = { path = "crates/horizon-client" }
+meteor-mod = { path = "mod" }
+meteor-core = { path = "../core" }
+horizon-api-shim = { path = "shim" }
