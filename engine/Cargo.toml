@@ -3,13 +3,13 @@ name = "meteor-engine"
 version = "0.1.0"
 edition = "2021"
 license = "GPL-3.0-or-later"
+description = "Meteor Client for Horizon: the [api] package the launcher links into the game"
 
 [lib]
 name = "meteor_engine"
 path = "src/lib.rs"
 
 [dependencies]
+# The launcher stages Horizon's source and points this at it. For a checkout
+# build, point it at your own Horizon tree (--horizon-client).
 horizon-client = { path = "crates/horizon-client" }
-meteor-mod = { path = "mod" }
-meteor-core = { path = "../core" }
-horizon-api-shim = { path = "shim" }

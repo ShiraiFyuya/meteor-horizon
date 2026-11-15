@@ -1,21 +1,18 @@
-//! The bundle's `[api]` package: what `horizon-launcher native-build` links
-//! into the game and calls `hooks()` on.
+//! Meteor Client for Horizon: one package, linked into the game by the launcher.
 //!
-//! Everything substantial lives in `meteor-mod`; this file only re-exports it and
-//! pins the trait object type so a bundle build fails loudly if Horizon's
-//! `Hooks` trait and the port drift apart.
+//! * [`meteor_core`] - the engine-agnostic systems (modules, settings, config, HUD
+//!   model, commands, friends, theme);
+//! * [`port`] - the mod itself: the state, the `Env` over Horizon's `Host`, the
+//!   hooks, the ClickGUI, the HUD and the 169 modules;
+//! * [`horizon_api_shim`] - the seam to `horizon_client::mod_api`.
 
-pub use meteor_mod::*;
+pub mod horizon_api_shim;
+pub mod meteor_core;
+pub mod port;
 
-/// Horizon calls this once per process and keeps the object for the session.
+pub use port::*;
+
+/// Horizon's trait-mod entry point.
 pub fn hooks() -> Box<dyn horizon_api_shim::mod_api::Hooks> {
-    meteor_mod::hooks()
-}
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn hooks_links() {
-        let _ = super::hooks();
-    }
+    port::hooks()
 }

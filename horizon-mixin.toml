@@ -6,10 +6,6 @@ priority = 100
 [compatibility]
 horizon_revision = "ba6344a59cb9e755b730dcf02285fc0d33b97d3c"
 
+# Everything is one package: the port's modules plus the systems they use.
 [api]
 path = "engine"
-
-[[crate]]
-id = "core"
-path = "core"
-dependent = "engine"
