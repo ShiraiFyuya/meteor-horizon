@@ -4,7 +4,7 @@ A port of [Meteor Client](https://github.com/MeteorDevelopment/meteor-client) (t
 Minecraft Java utility client) to [Horizon](https://github.com/horizon-rust/horizon)
 (Minecraft: Java Edition 26.3 rewritten in Rust), as a **native Horizon trait mod**.
 
-This repository is the **buildable bundle** — the layout
+This repository is the **buildable bundle** - the layout
 `horizon-launcher native-build` and the launcher's "Add from GitHub" both expect:
 
 ```

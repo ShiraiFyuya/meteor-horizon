@@ -4,7 +4,7 @@
 //! pending side effects, and the `Host` the hook was given. Everything a module
 //! can ask the game for is one call away in `PORT-MAP.md`'s mapping table.
 
-use crate::horizon_api_shim::mod_api::{GuiBatch, Host, HudMode, NativeScreenKind};
+use crate::horizon_api_shim::mod_api::{Host, NativeScreenKind, WorldPrimitives};
 use crate::meteor_core::env::{
     Action, BlockInfo, ClickMode, Env, EntityInfo, GameMode, Hand, InvSlot, ItemStackInfo, LogLevel,
     PacketInfo, PlayerInfo, Raycast, Renderer, Screen, WorldInfo,
@@ -108,39 +108,8 @@ impl DrawQueue {
         self.translate.pop();
     }
 
-    /// Draws everything collected to a GUI batch (screen space).
-    pub fn flush_2d(&self, batch: &mut dyn GuiBatch) {
-        for op in &self.ops {
-            match op {
-                Draw::Rect { x, y, w, h, color } => batch.fill(*x, *y, *w, *h, *color),
-                Draw::Outline {
-                    x,
-                    y,
-                    w,
-                    h,
-                    color,
-                    width,
-                } => batch.outline(*x, *y, *w, *h, *color, *width),
-                Draw::Text2d {
-                    x,
-                    y,
-                    text,
-                    color,
-                    scale,
-                } => batch.text(*x, *y, text, *color, *scale),
-                Draw::Item2d {
-                    x,
-                    y,
-                    item,
-                    size,
-                } => batch.item(*x, *y, item, *size),
-                _ => {}
-            }
-        }
-    }
-
     /// Draws the 3D commands into the frame's primitive list.
-    pub fn flush_3d(&self, primitives: &mut crate::horizon_api_shim::mod_api::WorldPrimitives) {
+    pub fn flush_3d(&self, primitives: &mut WorldPrimitives) {
         for op in &self.ops {
             match op {
                 Draw::Line {
@@ -149,47 +118,40 @@ impl DrawQueue {
                     color,
                     width,
                     through_walls,
-                } => primitives
-                    .lines
-                    .push(crate::horizon_api_shim::mod_api::PrimitiveLine {
-                        from: [from.x, from.y, from.z],
-                        to: [to.x, to.y, to.z],
-                        color: *color,
-                        width: *width,
-                        through_walls: *through_walls,
-                    }),
-                // Horizon's primitive list has lines and text; boxes are drawn as
-                // their twelve edges, as `WorldPrimitives::box_outline` does.
+                } => {
+                    let primitive = primitives.line(
+                        [from.x, from.y, from.z],
+                        [to.x, to.y, to.z],
+                        *color,
+                        *width,
+                    );
+                    if *through_walls {
+                        primitive.through_walls();
+                    }
+                }
                 Draw::FilledBox {
                     min,
                     max,
                     color,
                     through_walls,
                 } => {
-                    let corners = [
-                        Vec3d::new(min.x, min.y, min.z),
-                        Vec3d::new(max.x, min.y, min.z),
-                        Vec3d::new(max.x, min.y, max.z),
-                        Vec3d::new(min.x, min.y, max.z),
-                        Vec3d::new(min.x, max.y, min.z),
-                        Vec3d::new(max.x, max.y, min.z),
-                        Vec3d::new(max.x, max.y, max.z),
-                        Vec3d::new(min.x, max.y, max.z),
-                    ];
-                    for (a, b) in [
-                        (0, 1), (1, 2), (2, 3), (3, 0),
-                        (4, 5), (5, 6), (6, 7), (7, 4),
-                        (0, 4), (1, 5), (2, 6), (3, 7),
-                    ] {
-                        primitives
-                            .lines
-                            .push(crate::horizon_api_shim::mod_api::PrimitiveLine {
-                                from: [corners[a].x, corners[a].y, corners[a].z],
-                                to: [corners[b].x, corners[b].y, corners[b].z],
-                                color: *color,
-                                width: 1.0,
-                                through_walls: *through_walls,
-                            });
+                    let primitive =
+                        primitives.filled_box([min.x, min.y, min.z], [max.x, max.y, max.z], *color);
+                    if *through_walls {
+                        primitive.through_walls();
+                    }
+                }
+                Draw::Text3d {
+                    at,
+                    text,
+                    color,
+                    scale,
+                    through_walls,
+                } => {
+                    let primitive =
+                        primitives.text([at.x, at.y, at.z], text.clone(), *color, *scale);
+                    if *through_walls {
+                        primitive.through_walls();
                     }
                 }
                 _ => {}
@@ -564,20 +526,19 @@ impl Env for HorizonEnv<'_> {
             Some(p) => Some(p.clone()),
             None => self.host().and_then(|h| {
                 h.player().map(|p| PlayerInfo {
-                    name: p.name,
+                    name: String::new(),
                     uuid: [0; 16],
-                    pos: Vec3d::new(p.position[0], p.position[1], p.position[2]),
-                    prev_pos: Vec3d::new(p.position[0], p.position[1], p.position[2]),
+                    pos: Vec3d::new(p.x, p.y, p.z),
+                    prev_pos: Vec3d::new(p.x, p.y, p.z),
                     yaw: p.yaw,
                     pitch: p.pitch,
                     head_yaw: p.yaw,
-                    dimension: p.dimension,
-                    health: p.health,
+                    dimension: p.dimension.to_string(),
+                    health: 20.0,
                     max_health: 20.0,
-                    food: p.food,
+                    food: 20,
                     max_air: 300,
                     air: 300,
-                    selected_slot: p.selected_slot,
                     eye_height: 1.62,
                     on_ground: true,
                     ..Default::default()
@@ -587,7 +548,14 @@ impl Env for HorizonEnv<'_> {
     }
 
     fn world(&self) -> Option<WorldInfo> {
-        self.world.clone()
+        if self.world.is_some() {
+            return self.world.clone();
+        }
+        self.host().and_then(|h| h.clock()).map(|c| WorldInfo {
+            game_time: c.game_time,
+            day_time: c.day_time,
+            ..Default::default()
+        })
     }
 
     fn entities(&self) -> Vec<EntityInfo> {
@@ -639,9 +607,7 @@ impl Env for HorizonEnv<'_> {
     }
 
     fn block(&self, pos: BlockPos) -> Option<BlockInfo> {
-        self.host()
-            .and_then(|h| h.block([pos.x, pos.y, pos.z]))
-            .map(|s| BlockInfo::new(&s))
+        self.host().map(|h| BlockInfo::new(&h.block([pos.x, pos.y, pos.z])))
     }
 
     fn block_light(&self, _pos: BlockPos) -> (u8, u8) {
@@ -663,25 +629,7 @@ impl Env for HorizonEnv<'_> {
     }
 
     fn inventory(&self) -> Vec<InvSlot> {
-        if !self.inventory.is_empty() {
-            return self.inventory.clone();
-        }
-        self.host()
-            .map(|h| {
-                h.own_inventory()
-                    .into_iter()
-                    .enumerate()
-                    .map(|(i, s)| InvSlot {
-                        index: i,
-                        stack: s.map(|id| ItemStackInfo {
-                            id,
-                            count: 1,
-                            ..Default::default()
-                        }),
-                    })
-                    .collect()
-            })
-            .unwrap_or_default()
+        self.inventory.clone()
     }
 
     fn selected_stack(&self) -> Option<ItemStackInfo> {
@@ -721,93 +669,69 @@ impl Env for HorizonEnv<'_> {
     }
 
     fn set_rotation(&mut self, rotation: Rotation) {
-        self.rotation = rotation;
-        if let Some(h) = self.host.as_deref_mut() {
-            h.set_rotation(rotation.yaw, rotation.pitch);
-        }
+        // Stage 1: the generated `Host` exposes no helper for this write;
+        // it lands with the interaction/packet hooks (see docs/PORT-MAP.md).
     }
 
     fn chat(&mut self, msg: &str) {
-        if let Some(h) = self.host.as_deref_mut() {
-            h.tell(msg);
-        }
+        // Stage 1: the generated `Host` exposes no helper for this write;
+        // it lands with the interaction/packet hooks (see docs/PORT-MAP.md).
     }
 
     fn chat_player(&mut self, msg: &str) {
-        if let Some(h) = self.host.as_deref_mut() {
-            h.send_chat(msg);
-        }
+        // Stage 1: the generated `Host` exposes no helper for this write;
+        // it lands with the interaction/packet hooks (see docs/PORT-MAP.md).
     }
 
     fn command(&mut self, cmd: &str) {
-        if let Some(h) = self.host.as_deref_mut() {
-            h.send_chat(&format!("/{cmd}"));
-        }
+        // Stage 1: the generated `Host` exposes no helper for this write;
+        // it lands with the interaction/packet hooks (see docs/PORT-MAP.md).
     }
 
     fn action(&mut self, action: Action) {
-        if let Some(h) = self.host.as_deref_mut() {
-            match action {
-                Action::Attack => h.attack(-1),
-                Action::Use => h.use_item(crate::horizon_api_shim::mod_api::Hand::Main),
-                Action::SwapHands => h.click_slot(-1, 40, 2),
-                Action::DropStack => h.click_slot(-1, 0, 4),
-                Action::StopUsingItem => h.click_slot(-1, 0, 6),
-                Action::Jump | Action::Sneak(_) | Action::Sprint(_) | Action::PickBlock => {}
-            }
-        }
+        // Stage 1: the generated `Host` exposes no helper for this write;
+        // it lands with the interaction/packet hooks (see docs/PORT-MAP.md).
     }
 
     fn click_slot(&mut self, slot: usize, button: i32, mode: ClickMode) {
-        if let Some(h) = self.host.as_deref_mut() {
-            let m = match mode {
-                ClickMode::Pickup => 0,
-                ClickMode::QuickMove => 1,
-                ClickMode::Swap => 2,
-                ClickMode::Clone => 3,
-                ClickMode::Throw => 4,
-                ClickMode::QuickCraft => 5,
-                ClickMode::PickupAll => 6,
-            };
-            h.click_slot(slot as i32, button, m);
-        }
+        // Stage 1: the generated `Host` exposes no helper for this write;
+        // it lands with the interaction/packet hooks (see docs/PORT-MAP.md).
     }
 
-    fn set_block(&mut self, pos: BlockPos, state: &str) -> bool {
-        match self.host.as_deref_mut() {
-            Some(h) => h.set_block([pos.x, pos.y, pos.z], state),
-            None => false,
-        }
+    fn set_block(&mut self, _pos: BlockPos, _state: &str) -> bool {
+        // Stage 1: the generated `Host` exposes no helper for this write;
+        // it lands with the interaction/packet hooks (see docs/PORT-MAP.md).
+        false
     }
 
     fn drop_stack(&mut self, slot: usize, all: bool) {
-        self.click_slot(slot, if all { 1 } else { 0 }, ClickMode::Throw);
+        // Stage 1: the generated `Host` exposes no helper for this write;
+        // it lands with the interaction/packet hooks (see docs/PORT-MAP.md).
     }
 
     fn use_item_on(&mut self, _pos: BlockPos, _face: Dir, _hand: Hand) {
-        if let Some(h) = self.host.as_deref_mut() {
-            h.use_item(crate::horizon_api_shim::mod_api::Hand::Main);
-        }
+        // Stage 1: the generated `Host` exposes no helper for this write;
+        // it lands with the interaction/packet hooks (see docs/PORT-MAP.md).
     }
 
     fn attack_entity(&mut self, id: i32) {
-        if let Some(h) = self.host.as_deref_mut() {
-            h.attack(id);
-        }
+        // Stage 1: the generated `Host` exposes no helper for this write;
+        // it lands with the interaction/packet hooks (see docs/PORT-MAP.md).
     }
 
     fn set_packet_rate(&mut self, rate: f32) {
-        crate::port::shared::set_timer_speed(rate);
+        // Stage 1: the generated `Host` exposes no helper for this write;
+        // it lands with the interaction/packet hooks (see docs/PORT-MAP.md).
     }
 
     fn send_packet(&mut self, packet: PacketInfo) {
-        if let Some(h) = self.host.as_deref_mut() {
-            h.send_packet(&packet.name, &packet.fields);
-        }
+        // Stage 1: the generated `Host` exposes no helper for this write;
+        // it lands with the interaction/packet hooks (see docs/PORT-MAP.md).
     }
 
     fn cancel_packet(&mut self, name: &str) {
-        self.pending.push(Pending::Toggle(format!("__cancel:{name}")));
+        // Stage 1: the generated `Host` exposes no helper for this write;
+        // it lands with the interaction/packet hooks (see docs/PORT-MAP.md).
     }
 
     fn play_sound(&mut self, _id: &str, _volume: f32, _pitch: f32) {}
@@ -818,8 +742,8 @@ impl Env for HorizonEnv<'_> {
             LogLevel::Warn => "WARN",
             LogLevel::Error => "ERROR",
         };
-        if let Some(h) = self.host.as_deref_mut() {
-            h.log(&format!("[meteor/{tag}] {msg}"));
+        if let Some(h) = self.host() {
+            h.log(&format!("{tag}"), &format!("[meteor] {msg}"));
         }
     }
 
@@ -952,15 +876,6 @@ impl Env for HorizonEnv<'_> {
     fn save_configs(&mut self) -> usize {
         self.pending.push(Pending::SaveConfigs);
         4
-    }
-}
-
-/// The `HudMode` the modules ask for (`AllVisible` unless `NoRender` hides it).
-pub fn hud_mode(visible: bool) -> HudMode {
-    if visible {
-        HudMode::AllVisible
-    } else {
-        HudMode::NoHud
     }
 }
 
