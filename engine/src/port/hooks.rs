@@ -68,12 +68,21 @@ impl Hooks for MeteorHooks {
         *previous = Some(screen);
     }
 
-    fn gui_render_post(&self, _host: &dyn Host, event: &mut GuiRenderPostEvent<'_>) {
-        // Stage 1 of the Horizon seam: the window's batch is reached through
-        // Horizon's own HUD geometry (`HudBatch::quad`), and drawing the ClickGUI
-        // and the HUD text on top of it needs the font atlas. Until that adapter
-        // exists the port runs with the world primitives only.
-        let _ = (event.gui_hidden, event.focused);
+    fn gui_render_post(&self, host: &dyn Host, event: &mut GuiRenderPostEvent<'_>) {
+        let mut queue = DrawQueue::new((event.batch.width as f64, event.batch.height as f64));
+        if let (Ok(mut shared), Ok(mut gui)) = (self.shared.lock(), self.gui.lock()) {
+            let snapshot = shared.snapshot.clone();
+            let mut pending = Vec::new();
+            let ticks = shared.ticks;
+            let mut env =
+                crate::port::env_impl::HorizonEnv::new_headless(&snapshot, &mut pending, ticks);
+            shared.hud.render(&mut env, &mut queue);
+            shared.modules.render_2d(&mut env, &mut queue);
+            if gui.is_open() {
+                gui.render(&mut shared, &mut queue, event.gui_hidden);
+            }
+        }
+        queue.flush_to_hud(host, event.batch);
     }
 
     fn world_primitives(&self, _host: &dyn Host, event: &mut WorldPrimitivesEvent<'_>) {
@@ -84,9 +93,34 @@ impl Hooks for MeteorHooks {
         queue.flush_3d(event.primitives);
     }
 
-    fn input_key(&self, _host: &mut dyn Host, _event: &mut InputKeyEvent<'_>) {
-        // The bind flow needs a GLFW key code; `InputKeyEvent` carries a winit
-        // `KeyEvent`, so the translation lands with the GUI adapter (stage 2).
+    fn input_key(&self, host: &mut dyn Host, event: &mut InputKeyEvent<'_>) {
+        // The generated event carries winit's `KeyEvent`; the port maps the
+        // physical key by its debug name so it does not have to depend on winit.
+        let code = format!("{:?}", event.event.physical_key);
+        let pressed = format!("{:?}", event.event.state).contains("Pressed");
+        if !pressed {
+            return;
+        }
+        let Ok(mut gui) = self.gui.lock() else { return };
+        if code.contains("ShiftRight") {
+            gui.toggle();
+            return;
+        }
+        if !gui.is_open() {
+            return;
+        }
+        let Ok(mut shared) = self.shared.lock() else { return };
+        if code.contains("Escape") {
+            gui.on_key(&mut shared, 256, true, 0);
+        } else if code.contains("ArrowUp") {
+            gui.nav(&shared, -1);
+        } else if code.contains("ArrowDown") {
+            gui.nav(&shared, 1);
+        } else if code.contains("Enter") {
+            gui.activate_selected(&mut shared);
+        } else if code.contains("Tab") {
+            gui.toggle_settings_of_selected();
+        }
     }
 }
 

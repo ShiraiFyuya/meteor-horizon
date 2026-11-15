@@ -4,7 +4,7 @@
 //! pending side effects, and the `Host` the hook was given. Everything a module
 //! can ask the game for is one call away in `PORT-MAP.md`'s mapping table.
 
-use crate::horizon_api_shim::mod_api::{Host, NativeScreenKind, WorldPrimitives};
+use crate::horizon_api_shim::mod_api::{GuiDraw, Host, HudBatch, NativeScreenKind, Text, WorldPrimitives};
 use crate::meteor_core::env::{
     Action, BlockInfo, ClickMode, Env, EntityInfo, GameMode, Hand, InvSlot, ItemStackInfo, LogLevel,
     PacketInfo, PlayerInfo, Raycast, Renderer, Screen, WorldInfo,
@@ -106,6 +106,48 @@ impl DrawQueue {
 
     pub fn pop_translate(&mut self) {
         self.translate.pop();
+    }
+
+    /// Draws the 2D commands into the frame's HUD batch through the game's own
+    /// paint helper, so the port's rectangles and text land in the same batch as
+    /// Horizon's HUD (same font, same GUI scale).
+    pub fn flush_to_hud(&self, host: &dyn Host, batch: &mut HudBatch) {
+        let mut draws: Vec<GuiDraw> = Vec::new();
+        for op in &self.ops {
+            match op {
+                Draw::Rect { x, y, w, h, color } => draws.push(GuiDraw::Fill {
+                    x0: *x as i32,
+                    y0: *y as i32,
+                    x1: (*x + *w) as i32,
+                    y1: (*y + *h) as i32,
+                    color: *color,
+                }),
+                Draw::Outline { x, y, w, h, color, width } => {
+                    let (x0, y0) = (*x as i32, *y as i32);
+                    let (x1, y1) = ((*x + *w) as i32, (*y + *h) as i32);
+                    let t = (*width).max(1.0) as i32;
+                    for (a, b, c, d) in [
+                        (x0, y0, x1, y0 + t),
+                        (x0, y1 - t, x1, y1),
+                        (x0, y0, x0 + t, y1),
+                        (x1 - t, y0, x1, y1),
+                    ] {
+                        draws.push(GuiDraw::Fill { x0: a, y0: b, x1: c, y1: d, color: *color });
+                    }
+                }
+                Draw::Text2d { x, y, text, color, scale } => draws.push(GuiDraw::Text {
+                    text: Text::literal(text.clone()),
+                    x: *x as i32,
+                    y: *y as i32,
+                    color: *color,
+                    shadow: *scale > 0.0,
+                }),
+                _ => {}
+            }
+        }
+        if !draws.is_empty() {
+            host.gui_paint(batch, &draws);
+        }
     }
 
     /// Draws the 3D commands into the frame's primitive list.

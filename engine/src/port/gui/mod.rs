@@ -44,6 +44,8 @@ pub struct ClickGui {
     expanded: BTreeMap<String, bool>,
     laid_out: bool,
     caret: f64,
+    /// The row the keyboard is on (`ClickGui`'s key navigation).
+    selected: Option<&'static str>,
     /// `HudEditorScreen`: the HUD elements are draggable while this is on.
     hud_editor: bool,
     /// The element being dragged, by index into `Hud::elements`.
@@ -81,6 +83,7 @@ impl ClickGui {
             expanded: BTreeMap::new(),
             laid_out: false,
             caret: 0.0,
+            selected: None,
             hud_editor: false,
             dragging_hud: None,
             last_drag_mouse: (0.0, 0.0),
@@ -146,6 +149,44 @@ impl ClickGui {
             a.background = approach(a.background, if active || hovered { 1.0 } else { 0.0 }, delta * 4.0);
             a.bar = approach(a.bar, if active { 1.0 } else { 0.0 }, delta * 6.0);
         }
+    }
+
+    /// Moves the keyboard selection by `delta` rows over every window in order.
+    pub fn nav(&mut self, shared: &Shared, delta: i32) {
+        let mut rows: Vec<&'static str> = Vec::new();
+        for category in Category::ALL {
+            rows.extend(self.filtered(shared, category));
+        }
+        if rows.is_empty() {
+            self.selected = None;
+            return;
+        }
+        let current = self
+            .selected
+            .and_then(|name| rows.iter().position(|row| *row == name));
+        let next = match current {
+            None if delta >= 0 => 0,
+            None => rows.len() - 1,
+            Some(i) => (i as i32 + delta).rem_euclid(rows.len() as i32) as usize,
+        };
+        self.selected = Some(rows[next]);
+    }
+
+    /// Toggles the selected row (`Enter`).
+    pub fn activate_selected(&mut self, shared: &mut Shared) {
+        let Some(name) = self.selected else { return };
+        let feedback = shared.config.chat_feedback;
+        let mut env = crate::port::env_impl::HeadlessEnv::new();
+        shared
+            .modules
+            .toggle_with_message_by_name(name, &mut env, feedback);
+    }
+
+    /// Opens/closes the settings of the selected row (`Tab`).
+    pub fn toggle_settings_of_selected(&mut self) {
+        let Some(name) = self.selected else { return };
+        let open = self.expanded.get(name).copied().unwrap_or(false);
+        self.expanded.insert(name.to_string(), !open);
     }
 
     fn hovered_module(&self, shared: &Shared) -> Option<&'static str> {
@@ -597,6 +638,9 @@ impl ClickGui {
             } else {
                 anim.background
             };
+            if self.selected == Some(name) {
+                q.outline(x, y, w, row_h, theme.accent().argb(), 1.0);
+            }
             if progress > 0.0 {
                 q.fill(
                     x,
