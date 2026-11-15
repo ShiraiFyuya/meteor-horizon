@@ -1,9 +1,9 @@
 [package]
 name = "meteor-core"
 description = "Meteor Client's engine-agnostic systems (modules, settings, config, HUD model, commands, theme) ported to Rust"
-version.workspace = true
-edition.workspace = true
-license.workspace = true
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-or-later"
 
 [lib]
 name = "meteor_core"

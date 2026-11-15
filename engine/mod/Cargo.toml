@@ -1,9 +1,9 @@
 [package]
 name = "meteor-mod"
 description = "Meteor Client for Horizon: the trait-mod package ([api] path) that links the port into the game"
-version.workspace = true
-edition.workspace = true
-license.workspace = true
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-or-later"
 
 [lib]
 name = "meteor_mod"
